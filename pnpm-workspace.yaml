@@ -1,3 +1,6 @@
+packages:
+  - 'aws-blocks'
+
 minimumReleaseAgeExclude:
   - '@next/*'
   - next

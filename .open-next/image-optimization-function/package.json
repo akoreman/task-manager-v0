@@ -1,0 +1,7 @@
+{
+  "name": "image-optimization-function",
+  "private": true,
+  "dependencies": {
+    "sharp": "^0.34.0"
+  }
+}
