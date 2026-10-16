@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { authClient } from '@/lib/auth-client'
+import { authApi } from 'aws-blocks'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -24,16 +24,20 @@ export function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
     setError(null)
     setLoading(true)
 
-    const { error } = isSignUp
-      ? await authClient.signUp.email({ email, password, name })
-      : await authClient.signIn.email({ email, password })
-
-    setLoading(false)
-
-    if (error) {
-      setError(error.message ?? 'Something went wrong')
+    // The Blocks client throws on failure (Better Auth returned `{ error }`).
+    try {
+      if (isSignUp) {
+        await authApi.signUp(name, email, password)
+      } else {
+        await authApi.signIn(email, password)
+      }
+    } catch (e) {
+      setLoading(false)
+      setError((e as Error).message ?? 'Something went wrong')
       return
     }
+
+    setLoading(false)
 
     router.push('/')
     router.refresh()

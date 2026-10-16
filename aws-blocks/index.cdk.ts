@@ -1,0 +1,44 @@
+import * as cdk from 'aws-cdk-lib';
+
+import { Hosting, BlocksStack, BlocksPresets } from '@aws-blocks/blocks/cdk';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import { getStackName } from '@aws-blocks/blocks/scripts';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+const app = new cdk.App();
+
+cdk.Tags.of(app).add("aws-mcp:deploy:sop", "migrate-to-blocks-freeform");
+
+const sandboxMode = app.node.tryGetContext('sandboxMode') === 'true';
+const projectRoot = app.node.tryGetContext('projectRoot') || process.cwd();
+
+const stackName = getStackName({ sandbox: sandboxMode, projectRoot });
+export const blocksStack = await BlocksStack.create(app, stackName, {
+  backendHandlerPath: join(__dirname, 'index.handler.ts'),
+  backendCDKPath: join(__dirname, 'index.ts'),
+  defaults: sandboxMode ? BlocksPresets.sandbox : BlocksPresets.production,
+});
+
+if (sandboxMode) {
+  // Tell the runtime that cookies need cross-domain attributes: the client
+  // (browser frontend, mobile app, or CLI) and the API on API Gateway sit on
+  // different registrable domains.
+  blocksStack.handler.addEnvironment('BLOCKS_SANDBOX', 'true');
+}
+
+// Add Next.js SSR hosting only when deploying (not in sandbox mode).
+// `api: blocksStack` makes CloudFront proxy `/aws-blocks/*` on the site's own
+// domain (so the auth session cookie is first-party) and injects
+// `BLOCKS_API_URL` into the SSR compute function for server-side `withAuth`.
+// No `buildOutputDir`: the Next.js adapter runs the OpenNext build and
+// resolves its own output.
+if (!sandboxMode) {
+  new Hosting(blocksStack, 'Hosting', {
+    root: join(__dirname, '..'),
+    framework: 'nextjs',
+    buildCommand: 'npm run build',
+    api: blocksStack
+  });
+}
