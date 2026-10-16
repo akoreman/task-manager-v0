@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { authClient } from '@/lib/auth-client'
+import { authApi, api } from 'aws-blocks'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -24,16 +24,27 @@ export function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
     setError(null)
     setLoading(true)
 
-    const { error } = isSignUp
-      ? await authClient.signUp.email({ email, password, name })
-      : await authClient.signIn.email({ email, password })
+    // The Blocks auth client is a state machine: `setAuthState` takes a FLAT
+    // input (`{ action, ...fields }`) and returns the next `AuthState` instead
+    // of throwing on bad credentials.
+    const next = await authApi.setAuthState(
+      isSignUp
+        ? { action: 'signUp', username: email, password }
+        : { action: 'signIn', username: email, password },
+    )
 
-    setLoading(false)
-
-    if (error) {
-      setError(error.message ?? 'Something went wrong')
+    if (next.state !== 'signedIn') {
+      setLoading(false)
+      setError(next.error ?? 'Something went wrong')
       return
     }
+
+    // Preserve the display name collected by the sign-up form.
+    if (isSignUp && name) {
+      await api.setProfileName(name)
+    }
+
+    setLoading(false)
 
     router.push('/')
     router.refresh()
