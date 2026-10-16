@@ -1,3 +1,14 @@
+nodeLinker: hoisted
+
+packages:
+  - aws-blocks
+
+onlyBuiltDependencies:
+  - esbuild
+  - '@tailwindcss/oxide'
+  - sharp
+
+
 minimumReleaseAgeExclude:
   - '@next/*'
   - next

@@ -1,49 +1,32 @@
 'use server'
 
-import { auth } from '@/lib/auth'
-import { db } from '@/lib/db'
-import { tasks, type TaskStatus } from '@/lib/db/schema'
-import { and, asc, eq } from 'drizzle-orm'
-import { headers } from 'next/headers'
+/**
+ * Server actions — same names/signatures as before, but the bodies now call the
+ * Blocks API instead of Drizzle. `withAuth` forwards the browser's cookies from
+ * `next/headers` to the RPC call and throws a 401 `ApiError` when there are
+ * none, so the old `getUserId()` session check is no longer needed. Status
+ * validation and title trimming live in the API method now.
+ */
+import { api } from 'aws-blocks'
+import { withAuth } from '@aws-blocks/blocks/server'
 import { revalidatePath } from 'next/cache'
+import type { Task, TaskStatus } from '@/lib/types'
 
-const STATUSES: TaskStatus[] = ['todo', 'in_progress', 'done']
-
-async function getUserId() {
-  const session = await auth.api.getSession({ headers: await headers() })
-  if (!session?.user) throw new Error('Unauthorized')
-  return session.user.id
-}
-
-export async function getTasks() {
-  const userId = await getUserId()
-  return db
-    .select()
-    .from(tasks)
-    .where(eq(tasks.userId, userId))
-    .orderBy(asc(tasks.createdAt))
+export async function getTasks(): Promise<Task[]> {
+  return withAuth(() => api.getTasks())
 }
 
 export async function createTask(title: string) {
-  const userId = await getUserId()
-  const trimmed = title.trim()
-  if (!trimmed) return
-  await db.insert(tasks).values({ userId, title: trimmed.slice(0, 500) })
+  await withAuth(() => api.createTask(title))
   revalidatePath('/')
 }
 
 export async function updateTaskStatus(id: number, status: TaskStatus) {
-  const userId = await getUserId()
-  if (!STATUSES.includes(status)) throw new Error('Invalid status')
-  await db
-    .update(tasks)
-    .set({ status })
-    .where(and(eq(tasks.id, id), eq(tasks.userId, userId)))
+  await withAuth(() => api.updateTaskStatus(id, status))
   revalidatePath('/')
 }
 
 export async function deleteTask(id: number) {
-  const userId = await getUserId()
-  await db.delete(tasks).where(and(eq(tasks.id, id), eq(tasks.userId, userId)))
+  await withAuth(() => api.deleteTask(id))
   revalidatePath('/')
 }

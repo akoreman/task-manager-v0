@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { authClient } from '@/lib/auth-client'
+import { authApi, api } from 'aws-blocks'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -24,16 +24,33 @@ export function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
     setError(null)
     setLoading(true)
 
-    const { error } = isSignUp
-      ? await authClient.signUp.email({ email, password, name })
-      : await authClient.signIn.email({ email, password })
+    // The auth block is a state machine: one FLAT input, and it returns the
+    // next `AuthState` instead of throwing on bad credentials.
+    const next = isSignUp
+      ? await authApi.setAuthState({
+          action: 'signUp',
+          username: email,
+          password,
+        })
+      : await authApi.setAuthState({
+          action: 'signIn',
+          username: email,
+          password,
+        })
 
-    setLoading(false)
-
-    if (error) {
-      setError(error.message ?? 'Something went wrong')
+    if (next.state !== 'signedIn') {
+      setLoading(false)
+      setError(next.error ?? 'Something went wrong')
       return
     }
+
+    // The auth block stores only username/password, so the display name
+    // collected at sign-up lives in the `"user"` profile row.
+    if (isSignUp) {
+      await api.saveProfile(name)
+    }
+
+    setLoading(false)
 
     router.push('/')
     router.refresh()
