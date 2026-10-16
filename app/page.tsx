@@ -1,19 +1,23 @@
-import { auth } from '@/lib/auth'
-import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
-import { getTasks } from '@/app/actions/tasks'
+import { api, authApi } from 'aws-blocks'
+import { withAuth } from '@aws-blocks/blocks/server'
 import { TaskManager } from '@/components/task-manager'
 
 export default async function Page() {
-  const session = await auth.api.getSession({ headers: await headers() })
-  if (!session?.user) redirect('/sign-in')
+  let session = null
+  try {
+    session = await withAuth(() => authApi.getSession())
+  } catch {
+    session = null
+  }
+  if (!session) redirect('/sign-in')
 
-  const tasks = await getTasks()
+  const tasks = await withAuth(() => api.getTasks())
 
   return (
     <TaskManager
       initialTasks={tasks}
-      userName={session.user.name || session.user.email}
+      userName={session.name || session.email}
     />
   )
 }
