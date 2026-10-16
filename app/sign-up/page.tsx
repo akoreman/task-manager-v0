@@ -1,10 +1,17 @@
-import { auth } from '@/lib/auth'
-import { headers } from 'next/headers'
+import { withAuth } from '@aws-blocks/blocks/server'
+import { api } from 'aws-blocks'
 import { redirect } from 'next/navigation'
 import { AuthForm } from '@/components/auth-form'
 
 export default async function SignUpPage() {
-  const session = await auth.api.getSession({ headers: await headers() })
-  if (session?.user) redirect('/')
+  // `withAuth` forwards the request cookies to the API; it throws a 401
+  // `ApiError` when the browser sent no cookies at all, which means signed out.
+  let session = null
+  try {
+    session = await withAuth(() => api.getSession())
+  } catch {
+    session = null
+  }
+  if (session) redirect('/')
   return <AuthForm mode="sign-up" />
 }

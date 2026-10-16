@@ -1,3 +1,9 @@
+packages:
+  - aws-blocks
+
+onlyBuiltDependencies:
+  - esbuild
+
 minimumReleaseAgeExclude:
   - '@next/*'
   - next

@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { authClient } from '@/lib/auth-client'
+import { api } from 'aws-blocks'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -24,16 +24,19 @@ export function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
     setError(null)
     setLoading(true)
 
-    const { error } = isSignUp
-      ? await authClient.signUp.email({ email, password, name })
-      : await authClient.signIn.email({ email, password })
-
-    setLoading(false)
-
-    if (error) {
-      setError(error.message ?? 'Something went wrong')
+    try {
+      if (isSignUp) {
+        await api.signUp(name, email, password)
+      } else {
+        await api.signIn(email, password)
+      }
+    } catch (e) {
+      setLoading(false)
+      setError(e instanceof Error ? e.message : 'Something went wrong')
       return
     }
+
+    setLoading(false)
 
     router.push('/')
     router.refresh()
