@@ -2,13 +2,13 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { authClient } from '@/lib/auth-client'
+import { authApi } from 'aws-blocks'
 import {
   createTask,
   updateTaskStatus,
   deleteTask,
 } from '@/app/actions/tasks'
-import type { Task, TaskStatus } from '@/lib/db/schema'
+import type { Task, TaskStatus } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -63,7 +63,7 @@ export function TaskManager({
   }
 
   const handleSignOut = async () => {
-    await authClient.signOut()
+    await authApi.setAuthState({ action: 'signOut' })
     router.push('/sign-in')
     router.refresh()
   }

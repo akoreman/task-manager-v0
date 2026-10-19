@@ -10,17 +10,23 @@ This repository is linked to a [v0](https://v0.app) project. You can continue de
 
 ## Getting Started
 
-First, run the development server:
+Local development runs the AWS Blocks dev server, which serves the backend API
+and proxies the Next.js frontend:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
+pnpm install
+pnpm dev:server
 ```
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+
+Other useful scripts:
+
+```bash
+pnpm sandbox      # deploy the backend to your AWS sandbox
+pnpm deploy       # deploy the full app (backend + hosting)
+pnpm build        # production Next.js build
+```
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 

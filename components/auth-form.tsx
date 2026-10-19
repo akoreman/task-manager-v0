@@ -3,15 +3,26 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { authClient } from '@/lib/auth-client'
+import { authApi } from 'aws-blocks'
+import { hasAuthError } from '@aws-blocks/blocks/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card } from '@/components/ui/card'
 
+// Structured `AuthBasic` error names, matching `AuthBasicErrors` from the
+// backend package. They are declared here because `@aws-blocks/blocks` has no
+// browser entry exports — only `@aws-blocks/blocks/client` is bundlable in a
+// client component — and these names are part of the wire contract
+// (`AuthState.errorName`), never the human-facing `error` string.
+const AuthErrors = {
+  InvalidCredentials: 'InvalidCredentialsException',
+  UserAlreadyExists: 'UserAlreadyExistsException',
+  InvalidPassword: 'InvalidPasswordException',
+} as const
+
 export function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
   const router = useRouter()
-  const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -24,19 +35,40 @@ export function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
     setError(null)
     setLoading(true)
 
-    const { error } = isSignUp
-      ? await authClient.signUp.email({ email, password, name })
-      : await authClient.signIn.email({ email, password })
+    // `setAuthState` drives the auth state machine: the input is flat
+    // (`{ action, ...fields }`) and it returns the next `AuthState` instead of
+    // throwing. Sign-up is immediate (no `codeDelivery` is configured), so
+    // there is no `confirmSignUp` step to handle.
+    const next = isSignUp
+      ? await authApi.setAuthState({
+          action: 'signUp',
+          username: email,
+          password,
+        })
+      : await authApi.setAuthState({
+          action: 'signIn',
+          username: email,
+          password,
+        })
 
     setLoading(false)
 
-    if (error) {
-      setError(error.message ?? 'Something went wrong')
+    if (next.state === 'signedIn') {
+      router.push('/')
+      router.refresh()
       return
     }
 
-    router.push('/')
-    router.refresh()
+    // Branch on the structured error names, never on the human-facing string.
+    if (hasAuthError(next, AuthErrors.InvalidCredentials)) {
+      setError('Incorrect email or password')
+    } else if (hasAuthError(next, AuthErrors.UserAlreadyExists)) {
+      setError('An account with that email already exists')
+    } else if (hasAuthError(next, AuthErrors.InvalidPassword)) {
+      setError('Password must be at least 8 characters')
+    } else {
+      setError(next.error ?? 'Something went wrong')
+    }
   }
 
   return (
@@ -54,18 +86,6 @@ export function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
         </div>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          {isSignUp && (
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="name">Name</Label>
-              <Input
-                id="name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-                autoComplete="name"
-              />
-            </div>
-          )}
           <div className="flex flex-col gap-2">
             <Label htmlFor="email">Email</Label>
             <Input
