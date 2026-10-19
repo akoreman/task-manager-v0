@@ -3,11 +3,23 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { authClient } from '@/lib/auth-client'
+import { authApi, api } from 'aws-blocks'
+import { hasAuthError } from '@aws-blocks/blocks/client'
+import type { AuthBasicErrors } from '@aws-blocks/blocks'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card } from '@/components/ui/card'
+
+// `@aws-blocks/blocks` resolves to its browser build inside a client component,
+// and that build intentionally exports no runtime values — so the
+// `AuthBasicErrors` *value* cannot be imported here, only its type. The
+// structured error name is therefore pinned to the block's own constant type:
+// if AuthBasic ever renames it, this fails to compile instead of silently
+// never matching. `hasAuthError` itself is browser-safe via
+// `@aws-blocks/blocks/client`.
+const INVALID_CREDENTIALS: (typeof AuthBasicErrors)['InvalidCredentials'] =
+  'InvalidCredentialsException'
 
 export function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
   const router = useRouter()
@@ -24,19 +36,38 @@ export function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
     setError(null)
     setLoading(true)
 
-    const { error } = isSignUp
-      ? await authClient.signUp.email({ email, password, name })
-      : await authClient.signIn.email({ email, password })
+    try {
+      // Flat input — the AuthBasic state machine takes `action` alongside the
+      // credentials, never a nested `{ action, data }` payload.
+      const state = await authApi.setAuthState({
+        action: isSignUp ? 'signUp' : 'signIn',
+        username: email,
+        password,
+      })
 
-    setLoading(false)
+      // `setAuthState` resolves instead of throwing: errors arrive on the state.
+      if (state.errorName) {
+        setError(
+          hasAuthError(state, INVALID_CREDENTIALS)
+            ? (state.error ?? 'Incorrect email or password')
+            : (state.error ?? 'Something went wrong'),
+        )
+        return
+      }
 
-    if (error) {
-      setError(error.message ?? 'Something went wrong')
-      return
+      // The Name field is app data, not a Cognito attribute — persist it so the
+      // header's display name keeps working.
+      if (isSignUp) {
+        await api.saveProfile(name)
+      }
+
+      router.push('/')
+      router.refresh()
+    } catch {
+      setError('Something went wrong')
+    } finally {
+      setLoading(false)
     }
-
-    router.push('/')
-    router.refresh()
   }
 
   return (

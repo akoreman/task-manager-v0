@@ -1,3 +1,17 @@
 minimumReleaseAgeExclude:
   - '@next/*'
   - next
+
+packages:
+  - aws-blocks
+
+onlyBuiltDependencies:
+  - esbuild
+
+nodeLinker: hoisted
+
+# pnpm 12 asks for an explicit allow/deny per package with a build script.
+# esbuild is the only one (it is also listed in onlyBuiltDependencies above,
+# which pnpm 12 keeps reading for backwards compatibility).
+allowBuilds:
+  esbuild: true
