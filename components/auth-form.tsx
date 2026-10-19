@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { authClient } from '@/lib/auth-client'
+import { api, authApi } from 'aws-blocks'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -24,16 +24,33 @@ export function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
     setError(null)
     setLoading(true)
 
-    const { error } = isSignUp
-      ? await authClient.signUp.email({ email, password, name })
-      : await authClient.signIn.email({ email, password })
+    // The auth block exposes a state machine: setAuthState returns the next
+    // AuthState instead of throwing, so branch on the result.
+    const next = isSignUp
+      ? await authApi.setAuthState({
+          action: 'signUp',
+          username: email,
+          password,
+        })
+      : await authApi.setAuthState({
+          action: 'signIn',
+          username: email,
+          password,
+        })
 
-    setLoading(false)
-
-    if (error) {
-      setError(error.message ?? 'Something went wrong')
+    if (next.state !== 'signedIn') {
+      setLoading(false)
+      setError(next.error ?? 'Something went wrong')
       return
     }
+
+    // Persist the display name the sign-up form collects (Better Auth used to
+    // write it into the "user" table on sign-up).
+    if (isSignUp) {
+      await api.saveProfile(name)
+    }
+
+    setLoading(false)
 
     router.push('/')
     router.refresh()
