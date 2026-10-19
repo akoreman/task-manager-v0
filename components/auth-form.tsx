@@ -3,7 +3,13 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { authClient } from '@/lib/auth-client'
+import { authApi, api } from 'aws-blocks'
+// Browser-safe entry points: the `@aws-blocks/blocks` root export is empty
+// under the `browser` condition, so client components import the client
+// helpers from `/client`; the BB error constants come from the type-checked
+// browser-safe mirror in `lib/auth-errors.ts`.
+import { hasAuthError } from '@aws-blocks/blocks/client'
+import { AuthBasicErrors } from '@/lib/auth-errors'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -24,16 +30,30 @@ export function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
     setError(null)
     setLoading(true)
 
-    const { error } = isSignUp
-      ? await authClient.signUp.email({ email, password, name })
-      : await authClient.signIn.email({ email, password })
+    const next = await authApi.setAuthState({
+      action: isSignUp ? 'signUp' : 'signIn',
+      username: email,
+      password,
+    })
 
-    setLoading(false)
-
-    if (error) {
-      setError(error.message ?? 'Something went wrong')
+    if (next.state !== 'signedIn') {
+      // setAuthState resolves with a failed AuthState instead of throwing, so
+      // branch on the returned state (never on the human-facing message).
+      const fallback = hasAuthError(next, AuthBasicErrors.InvalidCredentials)
+        ? 'Invalid email or password'
+        : 'Something went wrong'
+      setError(next.error ?? fallback)
+      setLoading(false)
       return
     }
+
+    if (isSignUp) {
+      // Sign-up signs the user in immediately, so the session cookie is already
+      // set and the greeting can persist the entered name.
+      await api.saveProfile(name)
+    }
+
+    setLoading(false)
 
     router.push('/')
     router.refresh()
