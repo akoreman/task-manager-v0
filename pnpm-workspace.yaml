@@ -1,3 +1,11 @@
+packages:
+  - 'aws-blocks'
+
+# pnpm 11+ reads build-script allowlists from here (the `pnpm` field in
+# package.json is ignored). Kept in sync with package.json's `pnpm.allowBuilds`.
+allowBuilds:
+  esbuild: true
+
 minimumReleaseAgeExclude:
   - '@next/*'
   - next

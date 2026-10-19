@@ -3,11 +3,23 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { authClient } from '@/lib/auth-client'
+import { api, authApi } from 'aws-blocks'
+import { broadcastAuthChange } from '@aws-blocks/blocks/ui'
+// `hasAuthError` comes from the browser-safe `/client` subpath — the root
+// `@aws-blocks/blocks` entry is server-only (its browser build has no exports).
+import { hasAuthError } from '@aws-blocks/blocks/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card } from '@/components/ui/card'
+
+// Machine-readable `AuthState.errorName` values emitted by the AuthBasic block
+// (mirrors `AuthBasicErrors`, which only ships from the server-only root entry).
+// Never branch on the human-facing `error` string.
+const AUTH_ERRORS = {
+  InvalidCredentials: 'InvalidCredentialsException',
+  UserAlreadyExists: 'UserAlreadyExistsException',
+} as const
 
 export function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
   const router = useRouter()
@@ -24,19 +36,48 @@ export function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
     setError(null)
     setLoading(true)
 
-    const { error } = isSignUp
-      ? await authClient.signUp.email({ email, password, name })
-      : await authClient.signIn.email({ email, password })
+    try {
+      // `setAuthState` returns an AuthState instead of throwing — the auth
+      // block has no `codeDelivery`, so sign-up signs the user straight in.
+      const next = isSignUp
+        ? await authApi.setAuthState({
+            action: 'signUp',
+            username: email,
+            password,
+          })
+        : await authApi.setAuthState({
+            action: 'signIn',
+            username: email,
+            password,
+          })
 
-    setLoading(false)
+      if (next.state !== 'signedIn') {
+        if (hasAuthError(next, AUTH_ERRORS.UserAlreadyExists)) {
+          setError('An account with this email already exists')
+        } else if (hasAuthError(next, AUTH_ERRORS.InvalidCredentials)) {
+          setError('Invalid email or password')
+        } else {
+          setError(next.error ?? 'Something went wrong')
+        }
+        setLoading(false)
+        return
+      }
 
-    if (error) {
-      setError(error.message ?? 'Something went wrong')
-      return
+      // Browser-only: never call during SSR. This is inside a client-side
+      // submit handler, so `window` exists.
+      broadcastAuthChange(next.user ?? null)
+
+      if (isSignUp) {
+        // Keep the collected display name showing in the task header.
+        await api.setDisplayName(name)
+      }
+
+      router.push('/')
+      router.refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong')
+      setLoading(false)
     }
-
-    router.push('/')
-    router.refresh()
   }
 
   return (
