@@ -1,19 +1,34 @@
-import { auth } from '@/lib/auth'
 import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
-import { getTasks } from '@/app/actions/tasks'
+import { withAuth } from '@aws-blocks/blocks/server'
+import { api } from 'aws-blocks'
+import type { Task } from 'aws-blocks'
 import { TaskManager } from '@/components/task-manager'
 
+export const dynamic = 'force-dynamic'
+
 export default async function Page() {
-  const session = await auth.api.getSession({ headers: await headers() })
-  if (!session?.user) redirect('/sign-in')
+  const cookie = (await headers()).get('cookie')
+  if (!cookie) redirect('/sign-in')
 
-  const tasks = await getTasks()
+  let unauthorized = false
+  let me: { name: string; email: string } = { name: '', email: '' }
+  let tasks: Task[] = []
+  try {
+    const result = await withAuth(
+      async () => ({ me: await api.getMe(), tasks: await api.listTasks() }),
+      cookie
+    )
+    me = result.me
+    tasks = result.tasks
+  } catch (e) {
+    if ((e as { status?: number })?.status === 401) {
+      unauthorized = true
+    } else {
+      throw e
+    }
+  }
+  if (unauthorized) redirect('/sign-in')
 
-  return (
-    <TaskManager
-      initialTasks={tasks}
-      userName={session.user.name || session.user.email}
-    />
-  )
+  return <TaskManager initialTasks={tasks} userName={me.name || me.email} />
 }

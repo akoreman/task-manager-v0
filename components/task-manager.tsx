@@ -2,13 +2,10 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { authClient } from '@/lib/auth-client'
-import {
-  createTask,
-  updateTaskStatus,
-  deleteTask,
-} from '@/app/actions/tasks'
-import type { Task, TaskStatus } from '@/lib/db/schema'
+import { api, authApi } from 'aws-blocks'
+import type { Task, TaskStatus } from 'aws-blocks'
+import { ApiError } from '@aws-blocks/blocks/client'
+import { broadcastAuthChange } from '@aws-blocks/blocks/ui'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -37,33 +34,58 @@ export function TaskManager({
   const [title, setTitle] = useState('')
   const [, startTransition] = useTransition()
 
+  const handleError = (err: unknown) => {
+    if (err instanceof ApiError && err.status === 401) {
+      router.push('/sign-in')
+      return
+    }
+    console.error(err)
+  }
+
   const handleAdd = (e: React.FormEvent) => {
     e.preventDefault()
     const value = title.trim()
     if (!value) return
     setTitle('')
     startTransition(async () => {
-      await createTask(value)
-      router.refresh()
+      try {
+        await api.createTask(value)
+        router.refresh()
+      } catch (err) {
+        handleError(err)
+      }
     })
   }
 
   const handleStatus = (id: number, status: TaskStatus) => {
     startTransition(async () => {
-      await updateTaskStatus(id, status)
-      router.refresh()
+      try {
+        await api.updateTaskStatus(id, status)
+        router.refresh()
+      } catch (err) {
+        handleError(err)
+      }
     })
   }
 
   const handleDelete = (id: number) => {
     startTransition(async () => {
-      await deleteTask(id)
-      router.refresh()
+      try {
+        await api.deleteTask(id)
+        router.refresh()
+      } catch (err) {
+        handleError(err)
+      }
     })
   }
 
   const handleSignOut = async () => {
-    await authClient.signOut()
+    try {
+      await authApi.setAuthState({ action: 'signOut' })
+    } catch (err) {
+      console.error('Sign out failed', err)
+    }
+    broadcastAuthChange(null)
     router.push('/sign-in')
     router.refresh()
   }
