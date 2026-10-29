@@ -13,3 +13,12 @@ __v0_jsx-dev-runtime.ts
 node_modules
 .next/
 .DS_Store
+# AWS Blocks
+.blocks-sandbox
+cdk.out/
+.bb-data/
+.open-next/
+.blocks-sandbox/
+next-env.d.ts
+*.tsbuildinfo
+aws-blocks/blocks.spec.json
