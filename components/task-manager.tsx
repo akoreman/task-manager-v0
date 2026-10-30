@@ -2,13 +2,9 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { authClient } from '@/lib/auth-client'
-import {
-  createTask,
-  updateTaskStatus,
-  deleteTask,
-} from '@/app/actions/tasks'
-import type { Task, TaskStatus } from '@/lib/db/schema'
+import { authApi, api } from 'aws-blocks'
+import { broadcastAuthChange } from '@aws-blocks/blocks/ui'
+import type { Task, TaskStatus } from 'aws-blocks'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -43,29 +39,33 @@ export function TaskManager({
     if (!value) return
     setTitle('')
     startTransition(async () => {
-      await createTask(value)
+      await api.createTask(value)
       router.refresh()
     })
   }
 
   const handleStatus = (id: number, status: TaskStatus) => {
     startTransition(async () => {
-      await updateTaskStatus(id, status)
+      await api.updateTaskStatus(id, status)
       router.refresh()
     })
   }
 
   const handleDelete = (id: number) => {
     startTransition(async () => {
-      await deleteTask(id)
+      await api.deleteTask(id)
       router.refresh()
     })
   }
 
   const handleSignOut = async () => {
-    await authClient.signOut()
-    router.push('/sign-in')
-    router.refresh()
+    try {
+      await authApi.setAuthState({ action: 'signOut' })
+    } finally {
+      broadcastAuthChange(null)
+      router.push('/sign-in')
+      router.refresh()
+    }
   }
 
   const remaining = initialTasks.filter((t) => t.status !== 'done').length

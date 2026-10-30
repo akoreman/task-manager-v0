@@ -1,3 +1,10 @@
+packages:
+  - 'aws-blocks'
 minimumReleaseAgeExclude:
   - '@next/*'
   - next
+  - '@aws-blocks/*'
+verifyDepsBeforeRun: false
+nodeLinker: hoisted
+allowBuilds:
+  esbuild: true
