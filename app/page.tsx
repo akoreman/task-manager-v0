@@ -1,19 +1,38 @@
-import { auth } from '@/lib/auth'
-import { headers } from 'next/headers'
+import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
-import { getTasks } from '@/app/actions/tasks'
+import { withAuth } from '@aws-blocks/blocks/server'
+import { api } from 'aws-blocks'
+import type { Task } from 'aws-blocks'
 import { TaskManager } from '@/components/task-manager'
 
-export default async function Page() {
-  const session = await auth.api.getSession({ headers: await headers() })
-  if (!session?.user) redirect('/sign-in')
+export const dynamic = 'force-dynamic'
 
-  const tasks = await getTasks()
+export default async function Page() {
+  let data: { me: { name: string; email: string }; tasks: Task[] } | undefined
+  let signedOut = false
+
+  // withAuth throws when the request carries no cookies at all.
+  if ((await cookies()).getAll().length === 0) {
+    signedOut = true
+  } else {
+    try {
+      data = await withAuth(async () => ({
+        me: await api.getMe(),
+        tasks: await api.getTasks(),
+      }))
+    } catch (e) {
+      if ((e as any)?.status === 401) signedOut = true
+      else throw e
+    }
+  }
+
+  // redirect() works by throwing, so it must stay outside the try.
+  if (signedOut || !data) redirect('/sign-in')
 
   return (
     <TaskManager
-      initialTasks={tasks}
-      userName={session.user.name || session.user.email}
+      initialTasks={data.tasks}
+      userName={data.me.name || data.me.email}
     />
   )
 }
