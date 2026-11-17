@@ -3,40 +3,143 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { authClient } from '@/lib/auth-client'
+import { authApi, api } from 'aws-blocks'
+import { hasAuthError } from '@aws-blocks/blocks/client'
+import { broadcastAuthChange } from '@aws-blocks/blocks/ui'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card } from '@/components/ui/card'
 
-export function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
+const USERNAME_EXISTS = 'UsernameExistsException'
+const NOT_AUTHORIZED = 'NotAuthorizedException'
+const INVALID_PASSWORD = 'InvalidPasswordException'
+const USER_NOT_CONFIRMED = 'UserNotConfirmedException'
+const CODE_MISMATCH = 'CodeMismatchException'
+const EXPIRED_CODE = 'ExpiredCodeException'
+
+type AuthState = Awaited<ReturnType<typeof authApi.getAuthState>>
+
+function getSafeNext(next?: string): string {
+  if (
+    typeof next === 'string' &&
+    next.startsWith('/') &&
+    next[1] !== '/' &&
+    next[1] !== '\\'
+  ) {
+    return next
+  }
+  return '/'
+}
+
+export function AuthForm({
+  mode,
+  next,
+}: {
+  mode: 'sign-in' | 'sign-up'
+  next?: string
+}) {
   const router = useRouter()
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [code, setCode] = useState('')
+  const [confirming, setConfirming] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
   const isSignUp = mode === 'sign-up'
+  const safeNext = getSafeNext(next)
+  const query = next ? `?next=${encodeURIComponent(next)}` : ''
+
+  const finishSignIn = async (state: AuthState, displayName?: string) => {
+    await api.ensureUser(displayName)
+    broadcastAuthChange(state.user ?? null)
+    router.push(safeNext)
+    router.refresh()
+  }
+
+  const signIn = async (displayName?: string) => {
+    const state = await authApi.setAuthState({
+      action: 'signIn',
+      username: email,
+      password,
+    })
+    if (state.state === 'signedIn') {
+      await finishSignIn(state, displayName)
+      return
+    }
+    if (hasAuthError(state, NOT_AUTHORIZED)) {
+      setError('Invalid email or password')
+      return
+    }
+    if (hasAuthError(state, USER_NOT_CONFIRMED)) {
+      setConfirming(true)
+      return
+    }
+    setError(state.error ?? 'Something went wrong')
+  }
+
+  const signUp = async () => {
+    const state = await authApi.setAuthState({
+      action: 'signUp',
+      username: email,
+      password,
+      email,
+    })
+    if (state.state === 'confirmingSignUp') {
+      setConfirming(true)
+      return
+    }
+    if (hasAuthError(state, USERNAME_EXISTS)) {
+      setError('An account with this email already exists')
+      return
+    }
+    if (hasAuthError(state, INVALID_PASSWORD)) {
+      setError(state.error ?? 'Password does not meet requirements')
+      return
+    }
+    setError(state.error ?? 'Something went wrong')
+  }
+
+  const confirmSignUp = async () => {
+    const state = await authApi.setAuthState({
+      action: 'confirmSignUp',
+      username: email,
+      code: code.trim(),
+    })
+    if (state.state === 'signedOut' && !state.error) {
+      await signIn(isSignUp ? name : undefined)
+      return
+    }
+    if (hasAuthError(state, CODE_MISMATCH) || hasAuthError(state, EXPIRED_CODE)) {
+      setError('Invalid or expired code')
+      return
+    }
+    setError(state.error ?? 'Something went wrong')
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
     setLoading(true)
-
-    const { error } = isSignUp
-      ? await authClient.signUp.email({ email, password, name })
-      : await authClient.signIn.email({ email, password })
-
-    setLoading(false)
-
-    if (error) {
-      setError(error.message ?? 'Something went wrong')
-      return
+    try {
+      if (confirming) {
+        await confirmSignUp()
+      } else if (isSignUp) {
+        await signUp()
+      } else {
+        await signIn()
+      }
+    } catch (err) {
+      setError(
+        err instanceof Error && err.message
+          ? err.message
+          : 'Network error. Please try again.',
+      )
+    } finally {
+      setLoading(false)
     }
-
-    router.push('/')
-    router.refresh()
   }
 
   return (
@@ -90,6 +193,23 @@ export function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
             />
           </div>
 
+          {confirming && (
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="code">Verification code</Label>
+              <Input
+                id="code"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                required
+                inputMode="numeric"
+                autoComplete="one-time-code"
+              />
+              <p className="text-xs text-muted-foreground">
+                We sent a verification code to {email}
+              </p>
+            </div>
+          )}
+
           {error && (
             <p className="text-sm text-destructive" role="alert">
               {error}
@@ -99,16 +219,18 @@ export function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
           <Button type="submit" disabled={loading} className="w-full">
             {loading
               ? 'Please wait...'
-              : isSignUp
-                ? 'Create account'
-                : 'Sign in'}
+              : confirming
+                ? 'Verify'
+                : isSignUp
+                  ? 'Create account'
+                  : 'Sign in'}
           </Button>
         </form>
 
         <p className="text-sm text-muted-foreground text-center mt-6">
           {isSignUp ? 'Already have an account? ' : "Don't have an account? "}
           <Link
-            href={isSignUp ? '/sign-in' : '/sign-up'}
+            href={`${isSignUp ? '/sign-in' : '/sign-up'}${query}`}
             className="text-foreground font-medium underline-offset-4 hover:underline"
           >
             {isSignUp ? 'Sign in' : 'Sign up'}
