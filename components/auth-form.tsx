@@ -3,11 +3,36 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { authClient } from '@/lib/auth-client'
+import { api, authApi } from 'aws-blocks'
+import { hasAuthError } from '@aws-blocks/blocks/client'
+import { broadcastAuthChange } from '@aws-blocks/blocks/ui'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card } from '@/components/ui/card'
+
+const USERNAME_EXISTS = 'UsernameExistsException'
+const NOT_AUTHORIZED = 'NotAuthorizedException'
+const INVALID_PASSWORD = 'InvalidPasswordException'
+const CODE_MISMATCH = 'CodeMismatchException'
+const USER_NOT_CONFIRMED = 'UserNotConfirmedException'
+
+type AuthResult = Awaited<ReturnType<typeof authApi.getAuthState>>
+
+function errorMessage(state: AuthResult): string {
+  if (hasAuthError(state, USERNAME_EXISTS)) return 'An account with this email already exists'
+  if (hasAuthError(state, NOT_AUTHORIZED)) return 'Invalid email or password'
+  if (hasAuthError(state, INVALID_PASSWORD)) return 'Password must be at least 8 characters'
+  if (hasAuthError(state, CODE_MISMATCH)) return 'Invalid verification code'
+  if (hasAuthError(state, USER_NOT_CONFIRMED)) return 'Please confirm your email before signing in'
+  return state.error ?? 'Something went wrong'
+}
+
+function redirectTarget(): string {
+  const next = new URLSearchParams(window.location.search).get('next')
+  if (next && next.startsWith('/') && next[1] !== '/' && next[1] !== '\\') return next
+  return '/'
+}
 
 export function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
   const router = useRouter()
@@ -16,6 +41,8 @@ export function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [confirming, setConfirming] = useState(false)
+  const [code, setCode] = useState('')
 
   const isSignUp = mode === 'sign-up'
 
@@ -24,19 +51,85 @@ export function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
     setError(null)
     setLoading(true)
 
-    const { error } = isSignUp
-      ? await authClient.signUp.email({ email, password, name })
-      : await authClient.signIn.email({ email, password })
+    try {
+      if (isSignUp) {
+        const state = await authApi.setAuthState({
+          action: 'signUp',
+          username: email,
+          password,
+          email,
+        })
+        if (state.state === 'confirmingSignUp') {
+          setConfirming(true)
+          return
+        }
+        if (state.state === 'signedIn') {
+          await finishSignIn()
+          return
+        }
+        setError(errorMessage(state))
+        return
+      }
 
-    setLoading(false)
-
-    if (error) {
-      setError(error.message ?? 'Something went wrong')
-      return
+      const state = await authApi.setAuthState({
+        action: 'signIn',
+        username: email,
+        password,
+      })
+      if (state.state === 'signedIn') {
+        await finishSignIn()
+        return
+      }
+      setError(errorMessage(state))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Network error, please try again')
+    } finally {
+      setLoading(false)
     }
+  }
 
-    router.push('/')
+  const finishSignIn = async () => {
+    if (isSignUp) await api.syncUser(name)
+    else await api.syncUser()
+    broadcastAuthChange()
+    router.push(redirectTarget())
     router.refresh()
+  }
+
+  const handleConfirm = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError(null)
+    setLoading(true)
+
+    try {
+      const confirmed = await authApi.setAuthState({
+        action: 'confirmSignUp',
+        username: email,
+        code: code.trim(),
+      })
+      if (confirmed.error || (confirmed.state !== 'signedOut' && confirmed.state !== 'signedIn')) {
+        setError(errorMessage(confirmed))
+        return
+      }
+      if (confirmed.state === 'signedIn') {
+        await finishSignIn()
+        return
+      }
+      const state = await authApi.setAuthState({
+        action: 'signIn',
+        username: email,
+        password,
+      })
+      if (state.state === 'signedIn') {
+        await finishSignIn()
+        return
+      }
+      setError(errorMessage(state))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Network error, please try again')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -53,6 +146,34 @@ export function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
           </p>
         </div>
 
+        {confirming ? (
+          <form onSubmit={handleConfirm} className="flex flex-col gap-4">
+            <p className="text-sm text-muted-foreground">
+              Check your email for a verification code
+            </p>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="code">Code</Label>
+              <Input
+                id="code"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                required
+                inputMode="numeric"
+                autoComplete="one-time-code"
+              />
+            </div>
+
+            {error && (
+              <p className="text-sm text-destructive" role="alert">
+                {error}
+              </p>
+            )}
+
+            <Button type="submit" disabled={loading} className="w-full">
+              {loading ? 'Please wait...' : 'Confirm'}
+            </Button>
+          </form>
+        ) : (
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           {isSignUp && (
             <div className="flex flex-col gap-2">
@@ -104,6 +225,7 @@ export function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
                 : 'Sign in'}
           </Button>
         </form>
+        )}
 
         <p className="text-sm text-muted-foreground text-center mt-6">
           {isSignUp ? 'Already have an account? ' : "Don't have an account? "}
